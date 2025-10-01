@@ -3,7 +3,8 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, useMap } from
 import L from 'leaflet';
 import { MapPin, Navigation, Clock, Shield, AlertTriangle } from 'lucide-react';
 import { CalmZone, StressZone, Location } from '../types';
-import { RoutingService, OptimizedRoute } from '../services/routing';
+import { InsightsService } from '../services/insights';
+import { GPSService } from '../services/gps';
 import 'leaflet/dist/leaflet.css';
 
 // Fix for default markers in react-leaflet
@@ -58,7 +59,7 @@ const RouteSuggestions: React.FC<RouteSuggestionsProps> = ({
 }) => {
   const [startLocation, setStartLocation] = useState<Location | null>(currentLocation);
   const [endLocation, setEndLocation] = useState<Location | null>(null);
-  const [suggestedRoute, setSuggestedRoute] = useState<OptimizedRoute | null>(null);
+  const [suggestedRoute, setSuggestedRoute] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
   // Update start location when current location changes
@@ -81,21 +82,18 @@ const RouteSuggestions: React.FC<RouteSuggestionsProps> = ({
 
     setIsGenerating(true);
     
-    try {
-      const route = await RoutingService.getWalkingRoute(
-        startLocation,
-        endLocation,
-        calmZones,
-        stressZones
-      );
-      
-      setSuggestedRoute(route);
-    } catch (error) {
-      console.error('Failed to generate route:', error);
-      alert('Failed to generate route. Please try again.');
-    } finally {
-      setIsGenerating(false);
-    }
+    // Simulate API call delay
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const route = InsightsService.generateRouteSuggestion(
+      startLocation,
+      endLocation,
+      calmZones,
+      stressZones
+    );
+    
+    setSuggestedRoute(route);
+    setIsGenerating(false);
   };
 
   const getMapCenter = (): [number, number] => {
@@ -177,10 +175,6 @@ const RouteSuggestions: React.FC<RouteSuggestionsProps> = ({
             >
               {isGenerating ? 'Generating...' : 'Generate Calm Route'}
             </button>
-            
-            <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem', textAlign: 'center' }}>
-              💡 Using enhanced routing system with calm zone optimization
-            </p>
           </div>
 
           {/* Route Details */}
@@ -204,33 +198,12 @@ const RouteSuggestions: React.FC<RouteSuggestionsProps> = ({
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
                 <Clock size={16} />
-                <span>Duration: ~{Math.round(suggestedRoute.totalDuration / 60)} minutes</span>
+                <span>Duration: ~{suggestedRoute.estimatedDuration} minutes</span>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
                 <Navigation size={16} />
-                <span>Distance: {Math.round(suggestedRoute.totalDistance)}m</span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                  Difficulty: {RoutingService.getRouteDifficulty(suggestedRoute)}
-                </span>
-              </div>
-
-              <div style={{ 
-                padding: '0.75rem', 
-                backgroundColor: '#f0f9ff', 
-                borderRadius: '8px', 
-                border: '1px solid #bae6fd',
-                marginBottom: '1rem'
-              }}>
-                <div style={{ fontSize: '0.875rem', color: '#0369a1', fontWeight: '600', marginBottom: '0.25rem' }}>
-                  🧠 Smart Routing Active
-                </div>
-                <div style={{ fontSize: '0.75rem', color: '#0284c7' }}>
-                  This route has been optimized for calm walking, avoiding stress zones and including peaceful areas when possible.
-                </div>
+                <span>Distance: {GPSService.calculateDistance(suggestedRoute.start, suggestedRoute.end).toFixed(0)}m</span>
               </div>
 
               {suggestedRoute.includesCalmZones.length > 0 && (
@@ -246,18 +219,6 @@ const RouteSuggestions: React.FC<RouteSuggestionsProps> = ({
                   <span>Avoids {suggestedRoute.avoidsStressZones.length} stress zone(s)</span>
                 </div>
               )}
-
-              {/* Turn-by-turn instructions */}
-              <div style={{ marginTop: '1rem' }}>
-                <h4 style={{ marginBottom: '0.5rem', fontSize: '1rem', fontWeight: '600' }}>Turn-by-Turn Directions</h4>
-                <div style={{ maxHeight: '200px', overflowY: 'auto', backgroundColor: '#f8fafc', padding: '0.75rem', borderRadius: '8px' }}>
-                  {suggestedRoute.instructions.map((instruction, index) => (
-                    <div key={index} style={{ marginBottom: '0.5rem', fontSize: '0.875rem', lineHeight: '1.4' }}>
-                      {instruction}
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           )}
 
@@ -369,7 +330,11 @@ const RouteSuggestions: React.FC<RouteSuggestionsProps> = ({
             {/* Suggested route */}
             {suggestedRoute && (
               <Polyline
-                positions={suggestedRoute.waypoints.map((wp) => [wp.latitude, wp.longitude])}
+                positions={[
+                  [suggestedRoute.start.latitude, suggestedRoute.start.longitude],
+                  ...suggestedRoute.waypoints.map((wp: Location) => [wp.latitude, wp.longitude]),
+                  [suggestedRoute.end.latitude, suggestedRoute.end.longitude]
+                ]}
                 pathOptions={{
                   color: getCalmScoreColor(suggestedRoute.calmScore),
                   weight: 6,
@@ -377,35 +342,6 @@ const RouteSuggestions: React.FC<RouteSuggestionsProps> = ({
                 }}
               />
             )}
-
-            {/* Route waypoints */}
-            {suggestedRoute && suggestedRoute.waypoints.slice(1, -1).map((waypoint, index) => (
-              <Marker
-                key={`waypoint-${index}`}
-                position={[waypoint.latitude, waypoint.longitude]}
-                icon={L.divIcon({
-                  className: 'waypoint-marker',
-                  html: `<div style="
-                    background-color: #3b82f6;
-                    width: 12px;
-                    height: 12px;
-                    border-radius: 50%;
-                    border: 2px solid white;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-                  "></div>`,
-                  iconSize: [12, 12],
-                  iconAnchor: [6, 6]
-                })}
-              >
-                <Popup>
-                  <div>
-                    <strong>Waypoint {index + 1}</strong>
-                    <br />
-                    Step {index + 1} of {suggestedRoute.waypoints.length - 1}
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
 
             {/* Calm zones */}
             {calmZones.map((zone) => (
